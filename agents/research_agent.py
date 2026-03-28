@@ -9,17 +9,21 @@ def query_research(query: str):
     context = "\n".join([d.page_content for d in docs])
 
     prompt = f"""
-    You are an ML expert.
+You are an ML expert.
 
-    Answer the question clearly and directly.
+Use the following context to answer the question.
+If the context is not relevant, answer from your own knowledge.
 
-    NO asking for clarification.
-    NO vague responses.
+Context:
+{context}
 
-    Explain in simple terms.
+Question:
+{query}
 
-    Question:
-    {query}
-    """
+Answer clearly and directly.
+NO asking for clarification.
+NO vague responses.
+Explain in simple terms.
+"""
 
     return llm.invoke(prompt)

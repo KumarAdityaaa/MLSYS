@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+pandas
+matplotlib
+seaborn
+scikit-learn
+numpy
+langchain
+langchain-community
+langchain-chroma
+langchain-huggingface
+langchain-ollama
+chromadb
+pypdf
+pydantic

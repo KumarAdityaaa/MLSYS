@@ -3,93 +3,89 @@ from agents.data_agent import data_agent
 from agents.research_agent import query_research
 from agents.coding_agent import coding_agent
 from memory.conversation_memory import get_memory, add_to_memory
+
 llm = get_reasoning_model()
 
+AGENT_KEYWORDS = {
+    "data": ["dataset", "csv", "plot", "visualize", "analyse", "analyze", "pandas", "graph", "chart"],
+    "research": ["explain", "what is", "how does", "paper", "concept", "theory", "definition"],
+    "code": ["run", "execute", "implement", "train", "build", "code", "model", "script"],
+}
 
-def decide_agent(query: str):
+
+# =========================
+# DECIDE AGENT (rule-based fallback)
+# =========================
+def decide_agent(query: str) -> str:
+    query_lower = query.lower()
+
+    for agent, keywords in AGENT_KEYWORDS.items():
+        if any(kw in query_lower for kw in keywords):
+            return agent
+
+    # If no keyword match, ask the LLM
     prompt = f"""
-    You are an AI orchestrator.
+You are an AI orchestrator.
 
-    Decide which agent to use for this query:
+Decide which agent to use for this query.
 
-    Available agents:
-    - data → for dataset analysis, pandas, plots
-    - research → for papers, PDFs, explanations
-    - code → for programming, ML models, execution
+Available agents:
+- data → for dataset analysis, pandas, plots
+- research → for papers, PDFs, explanations
+- code → for programming, ML models, execution
 
-    Query:
-    {query}
+Query:
+{query}
 
-    Output ONLY one word:
-    data / research / code
-    """
-
+Reply with ONLY one word: data, research, or code
+"""
     decision = llm.invoke(prompt).strip().lower()
 
-    return decision
+    # Sanitize LLM response
+    for agent in ["data", "research", "code"]:
+        if agent in decision:
+            return agent
+
+    # Default fallback
+    return "research"
 
 
+# =========================
+# ORCHESTRATOR
+# =========================
 def orchestrator(query: str):
     context = get_memory()
 
-    planning_prompt = f"""
-    You are an AI orchestrator.
+    agent_name = decide_agent(query)
 
-    If question is:
-    - conceptual → use research ONLY
-    - coding → use code ONLY
-    - dataset → use data ONLY
+    print(f"\n[ORCHESTRATOR] Routing to: {agent_name}")
 
-    ONLY use multiple agents if absolutely required.
+    try:
+        if agent_name == "data":
+            result = data_agent(query)
 
-    Query:
-    {query}
+        elif agent_name == "research":
+            result = query_research(query)
 
-    Output:
+        else:
+            result = coding_agent(query)
 
-    step1: agent - task
-    """
+    except Exception as e:
+        print(f"[ORCHESTRATOR ERROR] {e}")
+        result = {"output": f"Agent failed with error: {str(e)}", "agent": agent_name}
 
-    plan = llm.invoke(planning_prompt)
+    # Normalize result
+    if isinstance(result, dict):
+        output = result.get("output") or result.get("response") or str(result)
+    else:
+        output = str(result)
 
-    print("\n[PLAN]\n", plan)
+    # Save to memory
+    add_to_memory(query, output)
 
-    steps = plan.split("\n")
-
-    final_output = ""
-
-    for step in steps:
-        if ":" not in step:
-            continue
-
-        try:
-            _, rest = step.split(":")
-            agent_name, task = rest.split("-", 1)
-
-            agent_name = agent_name.strip()
-            task = task.strip()
-
-            print(f"[STEP] {agent_name} → {task}")
-
-            if agent_name == "data":
-                result = data_agent(task)
-
-            elif agent_name == "research":
-                result = query_research(task)
-
-            else:
-                result = coding_agent(task)
-
-            final_output += f"\n\n[{agent_name.upper()} RESULT]\n{result}"
-
-        except Exception as e:
-            print("Error:", e)
-
-    # 🧠 SAVE MEMORY
-    add_to_memory(query, final_output)
-    print("\n[FINAL OUTPUT]\n", final_output)
+    print(f"\n[FINAL OUTPUT]\n{output}")
 
     return {
-        "output": final_output,
-        "agent": "multi-agent"
+        "output": output,
+        "agent": agent_name
     }

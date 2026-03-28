@@ -1,0 +1,27 @@
+# Virtual environment
+venc/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Data files
+data.csv
+memory.json
+output_*.png
+
+# ChromaDB (large vector database files)
+chroma_db/
+
+# Experiments output
+experiments.json
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,9 +1,9 @@
 from fastapi import APIRouter
-from memory.conversation_memory import memory
+from memory.conversation_memory import clear_memory
 
 router = APIRouter()
 
 @router.post("/clear-memory")
-def clear_memory():
-    memory.clear()
+def clear_memory_route():
+    clear_memory()
     return {"message": "Memory cleared"}

@@ -30,15 +30,13 @@ Rules:
 - ONLY return executable Python code
 """
 
-    # 🔥 Generate code
     code = llm.invoke(prompt)
 
-    # 🧼 Clean markdown (VERY IMPORTANT)
+    # Clean markdown
     code = code.replace("```python", "").replace("```", "").strip()
 
     print("\n[DATA AGENT CODE]\n", code)
 
-    # ⚡ Execute code
     result = execute_code(code)
 
     return {
@@ -51,32 +49,32 @@ Rules:
 # =========================
 # AUTO INSIGHTS
 # =========================
-def data_insights():
+def data_insights(query: str = "Give me a summary of the dataset"):
     import pandas as pd
 
     df = pd.read_csv(DATA_PATH)
-
     summary = df.describe().to_string()
 
     prompt = f"""
-    You are a data analyst.
+You are a data analyst.
 
-    Dataset: data.csv
+Dataset summary:
+{summary}
 
-    Task:
-    {query}
+Task:
+{query}
 
-    STRICT RULES:
-    - ONLY return Python code
-    - NO explanations
-    - NO markdown
-    - MUST use pandas
+STRICT RULES:
+- ONLY return Python code
+- NO explanations
+- NO markdown
+- MUST use pandas
 
-    If plotting:
-    - use matplotlib/seaborn
-    - save as output.png
+If plotting:
+- use matplotlib/seaborn
+- save as output.png
 
-    Your response MUST be valid Python code.
-    """
+Your response MUST be valid Python code.
+"""
 
     return llm.invoke(prompt)

@@ -9,11 +9,11 @@ import uuid
 # CLEAN CODE
 # =========================
 def clean_code(code: str, image_name: str):
-    # remove markdown
+    # Remove markdown
     code = re.sub(r"```python", "", code)
     code = re.sub(r"```", "", code)
 
-    # inject savefig ONLY if plotting used
+    # Inject savefig ONLY if plotting used
     if "plt." in code and "savefig" not in code:
         code += f"""
 import matplotlib.pyplot as plt
@@ -67,7 +67,7 @@ def execute_code(code: str):
 
         os.remove(temp_path)
 
-        # ✅ SUCCESS
+        # SUCCESS
         if result.returncode == 0:
             response = {
                 "code": code,
@@ -76,14 +76,19 @@ def execute_code(code: str):
 
             if os.path.exists(image_name):
                 response["image"] = image_name
+                # Schedule cleanup of old images (keep only latest 5)
+                _cleanup_old_images()
 
             return response
 
-        # 🔄 TRY INSTALL MISSING PACKAGE
+        # TRY INSTALL MISSING PACKAGE
         if install_missing_package(result.stderr):
             continue
 
-        # ❌ FAIL
+        # FAIL — clean up image if it was created
+        if os.path.exists(image_name):
+            os.remove(image_name)
+
         return {
             "code": code,
             "error": result.stderr.strip()
@@ -93,3 +98,24 @@ def execute_code(code: str):
         "code": code,
         "error": "Execution failed after retries"
     }
+
+
+# =========================
+# CLEANUP OLD IMAGES
+# =========================
+def _cleanup_old_images(keep: int = 5):
+    """Keep only the most recent N output images, delete the rest."""
+    images = [
+        f for f in os.listdir(".")
+        if f.startswith("output_") and f.endswith(".png")
+    ]
+
+    # Sort by modification time, newest first
+    images.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+
+    for old_image in images[keep:]:
+        try:
+            os.remove(old_image)
+            print(f"[CLEANUP] Deleted old image: {old_image}")
+        except Exception as e:
+            print(f"[CLEANUP] Could not delete {old_image}: {e}")

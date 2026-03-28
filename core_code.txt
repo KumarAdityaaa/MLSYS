@@ -1,0 +1,811 @@
+﻿========== D:\ml-ai-system\main.py ==========
+from fastapi import FastAPI
+from routes.chat import router as chat_router
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from routes.chat import router as chat_router
+from fastapi.staticfiles import StaticFiles
+from routes.data import router as data_router
+from routes.eda import router as eda_router
+from routes.experiments import router as exp_router
+from routes.memory import router as memory_router
+
+app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="."), name="static")
+app.include_router(memory_router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(eda_router)
+app.include_router(chat_router)
+app.include_router(exp_router)
+app.include_router(data_router)
+@app.get("/")
+def root():
+    return {"message": "ML AI System Running ðŸš€"}
+
+========== D:\ml-ai-system\agents\coding_agent.py ==========
+from models.ollama import get_coding_model
+from utils.code_executor import execute_code
+from experiments.tracker import save_experiment
+from utils.metric_extractor import extract_metrics
+from experiments.tracker import save_experiment
+llm = get_coding_model()
+
+def coding_agent(query: str):
+    prompt = f"""
+    You are a Python ML engineer.
+
+    Task:
+    {query}
+
+    STRICT RULES:
+    - ONLY return executable Python code
+    - NO explanations
+    - NO text outside code
+    - NO markdown (no ```)
+
+    If unsure, still return best possible code.
+
+    Use:
+    - sklearn / pandas / numpy
+    - Print results
+
+    IMPORTANT:
+    Your response MUST start with valid Python code.
+    """
+
+    code = llm.invoke(prompt)
+
+    # âŒ REMOVE TEXT BEFORE CODE
+    lines = code.split("\n")
+
+    # find first code-like line
+    for i, line in enumerate(lines):
+        if "import" in line or "from" in line:
+            code = "\n".join(lines[i:])
+            break
+
+    result = execute_code(code)
+
+    output = result.get("output", "")
+
+    # ðŸ§  Extract metrics
+    metrics = extract_metrics(output)
+
+    if not metrics:
+        metrics = {"note": "No metrics detected"}
+
+    # ðŸ’¾ Save experiment
+    save_experiment("auto-run", metrics)
+
+    return result
+
+========== D:\ml-ai-system\agents\data_agent.py ==========
+from models.ollama import get_coding_model
+from utils.code_executor import execute_code
+
+llm = get_coding_model()
+
+DATA_PATH = "data.csv"
+
+
+# =========================
+# MAIN DATA AGENT
+# =========================
+def data_agent(query: str):
+    prompt = f"""
+You are a data analyst.
+
+The dataset is stored in 'data.csv'.
+
+Task:
+{query}
+
+Write Python code using:
+- pandas
+- matplotlib
+- seaborn
+
+Rules:
+- Always load dataset using: pd.read_csv('data.csv')
+- If plotting â†’ save image as 'output.png'
+- Print useful outputs
+- ONLY return executable Python code
+"""
+
+    # ðŸ”¥ Generate code
+    code = llm.invoke(prompt)
+
+    # ðŸ§¼ Clean markdown (VERY IMPORTANT)
+    code = code.replace("```python", "").replace("```", "").strip()
+
+    print("\n[DATA AGENT CODE]\n", code)
+
+    # âš¡ Execute code
+    result = execute_code(code)
+
+    return {
+        "code": code,
+        "output": result.get("output"),
+        "image": result.get("image"),
+    }
+
+
+# =========================
+# AUTO INSIGHTS
+# =========================
+def data_insights():
+    import pandas as pd
+
+    df = pd.read_csv(DATA_PATH)
+
+    summary = df.describe().to_string()
+
+    prompt = f"""
+    You are a data analyst.
+
+    Dataset: data.csv
+
+    Task:
+    {query}
+
+    STRICT RULES:
+    - ONLY return Python code
+    - NO explanations
+    - NO markdown
+    - MUST use pandas
+
+    If plotting:
+    - use matplotlib/seaborn
+    - save as output.png
+
+    Your response MUST be valid Python code.
+    """
+
+    return llm.invoke(prompt)
+
+========== D:\ml-ai-system\agents\ml_agent.py ==========
+from models.ollama import get_reasoning_model, get_coding_model
+from utils.code_executor import execute_code
+
+reasoning_llm = get_reasoning_model()
+coding_llm = get_coding_model()
+
+def ml_agent(query: str):
+
+    if any(word in query for word in ["run", "execute", "dataset", "plot", "train"]):
+        
+        code_prompt = f"""
+        Write Python code for the following task:
+
+        {query}
+
+        IMPORTANT:
+        - Return ONLY raw Python code
+        - No markdown
+        - Include print statements for outputs
+        - If plotting, use matplotlib
+        """
+
+        code = coding_llm.invoke(code_prompt)
+
+        result = execute_code(code)
+
+        return result
+
+    elif "code" in query or "implement" in query:
+        return coding_llm.invoke(query)
+
+    else:
+        return reasoning_llm.invoke(query)
+
+========== D:\ml-ai-system\agents\orchestrator.py ==========
+from models.ollama import get_reasoning_model
+from agents.data_agent import data_agent
+from agents.research_agent import query_research
+from agents.coding_agent import coding_agent
+from memory.conversation_memory import get_memory, add_to_memory
+llm = get_reasoning_model()
+
+
+def decide_agent(query: str):
+    prompt = f"""
+    You are an AI orchestrator.
+
+    Decide which agent to use for this query:
+
+    Available agents:
+    - data â†’ for dataset analysis, pandas, plots
+    - research â†’ for papers, PDFs, explanations
+    - code â†’ for programming, ML models, execution
+
+    Query:
+    {query}
+
+    Output ONLY one word:
+    data / research / code
+    """
+
+    decision = llm.invoke(prompt).strip().lower()
+
+    return decision
+
+
+def orchestrator(query: str):
+    context = get_memory()
+
+    planning_prompt = f"""
+    You are an AI orchestrator.
+
+    If question is:
+    - conceptual â†’ use research ONLY
+    - coding â†’ use code ONLY
+    - dataset â†’ use data ONLY
+
+    ONLY use multiple agents if absolutely required.
+
+    Query:
+    {query}
+
+    Output:
+
+    step1: agent - task
+    """
+
+    plan = llm.invoke(planning_prompt)
+
+    print("\n[PLAN]\n", plan)
+
+    steps = plan.split("\n")
+
+    final_output = ""
+
+    for step in steps:
+        if ":" not in step:
+            continue
+
+        try:
+            _, rest = step.split(":")
+            agent_name, task = rest.split("-", 1)
+
+            agent_name = agent_name.strip()
+            task = task.strip()
+
+            print(f"[STEP] {agent_name} â†’ {task}")
+
+            if agent_name == "data":
+                result = data_agent(task)
+
+            elif agent_name == "research":
+                result = query_research(task)
+
+            else:
+                result = coding_agent(task)
+
+            final_output += f"\n\n[{agent_name.upper()} RESULT]\n{result}"
+
+        except Exception as e:
+            print("Error:", e)
+
+    # ðŸ§  SAVE MEMORY
+    add_to_memory(query, final_output)
+    print("\n[FINAL OUTPUT]\n", final_output)
+
+    return {
+        "output": final_output,
+        "agent": "multi-agent"
+    }
+
+========== D:\ml-ai-system\agents\research_agent.py ==========
+from models.ollama import get_reasoning_model
+from memory.vector_store import get_vector_store
+
+llm = get_reasoning_model()
+db = get_vector_store()
+
+def query_research(query: str):
+    docs = db.similarity_search(query, k=3)
+    context = "\n".join([d.page_content for d in docs])
+
+    prompt = f"""
+    You are an ML expert.
+
+    Answer the question clearly and directly.
+
+    NO asking for clarification.
+    NO vague responses.
+
+    Explain in simple terms.
+
+    Question:
+    {query}
+    """
+
+    return llm.invoke(prompt)
+
+========== D:\ml-ai-system\experiments\tracker.py ==========
+import json
+import os
+from datetime import datetime
+
+FILE = "experiments.json"
+
+def save_experiment(name, metrics):
+    experiment = {
+        "name": name,
+        "metrics": metrics,
+        "timestamp": str(datetime.now())
+    }
+
+    if not os.path.exists(FILE):
+        with open(FILE, "w") as f:
+            json.dump([], f)
+
+    with open(FILE, "r") as f:
+        data = json.load(f)
+
+    data.append(experiment)
+
+    with open(FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+    return experiment
+
+
+def get_experiments():
+    if not os.path.exists(FILE):
+        return []
+
+    with open(FILE, "r") as f:
+        return json.load(f)
+
+========== D:\ml-ai-system\frontend\node_modules\flatted\python\flatted.py ==========
+# ISC License
+#
+# Copyright (c) 2018-2025, Andrea Giammarchi, @WebReflection
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+# REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+# AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+# INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+# LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
+# OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+# PERFORMANCE OF THIS SOFTWARE.
+
+import json as _json
+
+class _Known:
+    def __init__(self):
+        self.key = []
+        self.value = []
+
+class _String:
+    def __init__(self, value):
+        self.value = value
+
+def _array_keys(value):
+    for i in range(len(value)):
+        yield i
+
+def _object_keys(value):
+    for key in value:
+        yield key
+
+def _is_array(value):
+    return isinstance(value, (list, tuple))
+
+def _is_object(value):
+    return isinstance(value, dict)
+
+def _is_string(value):
+    return isinstance(value, str)
+
+def _index(known, input, value):
+    input.append(value)
+    index = str(len(input) - 1)
+    known.key.append(value)
+    known.value.append(index)
+    return index
+
+def _relate(known, input, value):
+    if _is_string(value) or _is_array(value) or _is_object(value):
+        try:
+            return known.value[known.key.index(value)]
+        except:
+            return _index(known, input, value)
+
+    return value
+
+def _resolver(input, lazy, parsed):
+    def resolver(output):
+        keys = _array_keys(output) if _is_array(output) else _object_keys(output) if _is_object(output) else []
+        for key in keys:
+            value = output[key]
+            if isinstance(value, _String):
+                tmp = input[int(value.value)]
+                output[key] = tmp
+                if (_is_array(tmp) or _is_object(tmp)) and tmp not in parsed:
+                    parsed.append(tmp)
+                    lazy.append([output, key])
+
+        return output
+
+    return resolver
+
+def _transform(known, input, value):
+    if _is_array(value):
+        output = []
+        for val in value:
+            output.append(_relate(known, input, val))
+        return output
+
+    if _is_object(value):
+        obj = {}
+        for key in value:
+            obj[key] = _relate(known, input, value[key])
+        return obj
+
+    return value
+
+def _wrap(value):
+    if _is_string(value):
+        return _String(value)
+
+    if _is_array(value):
+        i = 0
+        for val in value:
+            value[i] = _wrap(val)
+            i += 1
+
+    elif _is_object(value):
+        for key in value:
+            value[key] = _wrap(value[key])
+
+    return value
+
+def parse(value, *args, **kwargs):
+    json = _json.loads(value, *args, **kwargs)
+    wrapped = []
+    for value in json:
+        wrapped.append(_wrap(value))
+
+    input = []
+    for value in wrapped:
+        if isinstance(value, _String):
+            input.append(value.value)
+        else:
+            input.append(value)
+
+    value = input[0]
+    lazy = []
+    revive = _resolver(input, lazy, [value])
+
+    value = revive(value)
+
+    i = 0
+    while i < len(lazy):
+        o, k = lazy[i]
+        i += 1
+        o[k] = revive(o[k])
+
+    return value
+
+
+def stringify(value, *args, **kwargs):
+    known = _Known()
+    input = []
+    output = []
+    i = int(_index(known, input, value))
+    while i < len(input):
+        output.append(_transform(known, input, input[i]))
+        i += 1
+    return _json.dumps(output, *args, **kwargs)
+
+========== D:\ml-ai-system\memory\conversation_memory.py ==========
+memory = []
+
+def add_to_memory(query, response):
+    memory.append({
+        "query": query,
+        "response": str(response)
+    })
+
+    # keep last 5 interactions only (lightweight)
+    if len(memory) > 5:
+        memory.pop(0)
+
+
+def get_memory():
+    context = ""
+
+    for m in memory:
+        context += f"""
+User: {m['query']}
+AI: {m['response']}
+"""
+
+    return context
+
+========== D:\ml-ai-system\memory\vector_store.py ==========
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+
+def get_vector_store():
+    embeddings = HuggingFaceEmbeddings()
+    
+    db = Chroma(
+        persist_directory="./chroma_db",
+        embedding_function=embeddings
+    )
+    
+    return db
+
+========== D:\ml-ai-system\models\ollama.py ==========
+from langchain_ollama import OllamaLLM
+
+def get_reasoning_model():
+    return OllamaLLM(model="qwen2.5:7b")
+
+def get_coding_model():
+    return OllamaLLM(model="deepseek-coder:6.7b")
+
+========== D:\ml-ai-system\routes\chat.py ==========
+from fastapi import APIRouter
+from pydantic import BaseModel
+from agents.orchestrator import orchestrator
+
+router = APIRouter()
+
+
+class ChatRequest(BaseModel):
+    query: str
+
+
+@router.post("/chat")
+def chat(req: ChatRequest):
+    query = req.query
+
+    result = orchestrator(query)
+
+    print("\n[DEBUG RESULT]\n", result)
+
+    # âœ… Normalize response
+    if isinstance(result, dict):
+        response = result.get("output") or result.get("response") or str(result)
+        agent = result.get("agent", "orchestrator")
+    else:
+        response = str(result)
+        agent = "orchestrator"
+
+    return {
+        "response": response,
+        "agent": agent
+    }
+
+========== D:\ml-ai-system\routes\data.py ==========
+from fastapi import APIRouter, UploadFile, File
+import pandas as pd
+import os
+
+router = APIRouter()
+
+DATA_PATH = "data.csv"
+
+@router.post("/upload-csv")
+async def upload_csv(file: UploadFile = File(...)):
+    with open(DATA_PATH, "wb") as f:
+        f.write(await file.read())
+
+    df = pd.read_csv(DATA_PATH)
+
+    return {
+        "columns": df.columns.tolist(),
+        "preview": df.head(5).to_dict(orient="records")
+    }
+
+========== D:\ml-ai-system\routes\eda.py ==========
+from fastapi import APIRouter
+import pandas as pd
+
+router = APIRouter()
+
+DATA_PATH = "data.csv"
+
+@router.get("/eda")
+def auto_eda():
+    df = pd.read_csv(DATA_PATH)
+
+    summary = {
+        "columns": df.columns.tolist(),
+        "shape": df.shape,
+        "dtypes": df.dtypes.astype(str).to_dict(),
+        "missing": df.isnull().sum().to_dict(),
+        "describe": df.describe().to_dict()
+    }
+
+    return summary
+
+========== D:\ml-ai-system\routes\experiments.py ==========
+from fastapi import APIRouter
+from pydantic import BaseModel
+from experiments.tracker import save_experiment, get_experiments
+
+router = APIRouter()
+
+class Experiment(BaseModel):
+    name: str
+    metrics: dict
+
+
+@router.post("/experiment")
+def add_experiment(exp: Experiment):
+    return save_experiment(exp.name, exp.metrics)
+
+
+@router.get("/experiments")
+def list_experiments():
+    return get_experiments()
+
+========== D:\ml-ai-system\routes\memory.py ==========
+from fastapi import APIRouter
+from memory.conversation_memory import memory
+
+router = APIRouter()
+
+@router.post("/clear-memory")
+def clear_memory():
+    memory.clear()
+    return {"message": "Memory cleared"}
+
+========== D:\ml-ai-system\utils\code_executor.py ==========
+import subprocess
+import tempfile
+import os
+import re
+import sys
+import uuid
+
+# =========================
+# CLEAN CODE
+# =========================
+def clean_code(code: str, image_name: str):
+    # remove markdown
+    code = re.sub(r"```python", "", code)
+    code = re.sub(r"```", "", code)
+
+    # inject savefig ONLY if plotting used
+    if "plt." in code and "savefig" not in code:
+        code += f"""
+import matplotlib.pyplot as plt
+plt.savefig("{image_name}")
+plt.close()
+"""
+
+    return code.strip()
+
+
+# =========================
+# AUTO INSTALL PACKAGES
+# =========================
+def install_missing_package(error_msg):
+    match = re.search(r"No module named '(.+?)'", error_msg)
+    if match:
+        package = match.group(1)
+        print(f"[INSTALLING] {package}")
+        subprocess.run([sys.executable, "-m", "pip", "install", package])
+        return True
+    return False
+
+
+# =========================
+# EXECUTE CODE
+# =========================
+def execute_code(code: str):
+    image_name = f"output_{uuid.uuid4().hex}.png"
+
+    code = clean_code(code, image_name)
+
+    for attempt in range(2):
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as temp:
+            temp.write(code.encode())
+            temp_path = temp.name
+
+        try:
+            result = subprocess.run(
+                [sys.executable, temp_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+        except subprocess.TimeoutExpired:
+            os.remove(temp_path)
+            return {
+                "code": code,
+                "error": "Execution timed out"
+            }
+
+        os.remove(temp_path)
+
+        # âœ… SUCCESS
+        if result.returncode == 0:
+            response = {
+                "code": code,
+                "output": result.stdout.strip()
+            }
+
+            if os.path.exists(image_name):
+                response["image"] = image_name
+
+            return response
+
+        # ðŸ”„ TRY INSTALL MISSING PACKAGE
+        if install_missing_package(result.stderr):
+            continue
+
+        # âŒ FAIL
+        return {
+            "code": code,
+            "error": result.stderr.strip()
+        }
+
+    return {
+        "code": code,
+        "error": "Execution failed after retries"
+    }
+
+========== D:\ml-ai-system\utils\metric_extractor.py ==========
+import re
+
+def extract_metrics(output: str):
+    metrics = {}
+
+    # Final metrics
+    acc_match = re.findall(r"accuracy[:=]\s*([0-9.]+)", output, re.IGNORECASE)
+    loss_match = re.findall(r"loss[:=]\s*([0-9.]+)", output, re.IGNORECASE)
+
+    if acc_match:
+        metrics["accuracy"] = float(acc_match[-1])
+
+    if loss_match:
+        metrics["loss"] = float(loss_match[-1])
+
+    # ðŸ“ˆ Epoch tracking
+    epoch_data = []
+
+    epoch_matches = re.findall(
+        r"epoch\s*(\d+).*?loss[:=]\s*([0-9.]+).*?(?:acc|accuracy)[:=]\s*([0-9.]+)",
+        output,
+        re.IGNORECASE
+    )
+
+    for match in epoch_matches:
+        epoch_data.append({
+            "epoch": int(match[0]),
+            "loss": float(match[1]),
+            "accuracy": float(match[2])
+        })
+
+    if epoch_data:
+        metrics["epochs"] = epoch_data
+
+    return metrics
+
+========== D:\ml-ai-system\utils\pdf_loader.py ==========
+from langchain_community.document_loaders import PyPDFLoader
+
+def load_pdf(file_path):
+    loader = PyPDFLoader(file_path)
+    return loader.load()
+
