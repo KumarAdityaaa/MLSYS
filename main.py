@@ -6,10 +6,11 @@ from routes.data import router as data_router
 from routes.eda import router as eda_router
 from routes.experiments import router as exp_router
 from routes.memory import router as memory_router
+from routes.research import router as research_router
 
 app = FastAPI()
 
-# Middleware must be added BEFORE routers
+# Middleware BEFORE routers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,6 +26,7 @@ app.include_router(eda_router)
 app.include_router(chat_router)
 app.include_router(exp_router)
 app.include_router(data_router)
+app.include_router(research_router)
 
 @app.get("/")
 def root():
