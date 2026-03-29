@@ -2,8 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 import os
 from utils.pdf_loader import load_pdf
 from memory.vector_store import get_vector_store
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 router = APIRouter()
 
 PDF_DIR = "uploaded_pdfs"
