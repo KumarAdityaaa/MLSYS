@@ -94,10 +94,19 @@ def execute_code(code: str):
             "error": result.stderr.strip()
         }
 
-    return {
-        "code": code,
-        "error": "Execution failed after retries"
-    }
+
+# Auto-debug on failure
+    try:
+        from agents.debug_agent import debug_agent
+        print("[DEBUG AGENT] Triggered automatically")
+        last_error = result.stderr.strip() if result else "Unknown error"
+        return debug_agent(code, last_error)
+    except Exception as e:
+        print(f"[DEBUG AGENT] Failed: {e}")
+        return {
+            "code": code,
+            "error": "Execution failed after retries"
+        }
 
 
 # =========================

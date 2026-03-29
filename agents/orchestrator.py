@@ -9,7 +9,8 @@ llm = get_reasoning_model()
 AGENT_KEYWORDS = {
     "data": ["dataset", "csv", "plot", "visualize", "analyse", "analyze", "pandas", "graph", "chart"],
     "research": ["explain", "what is", "how does", "paper", "concept", "theory", "definition"],
-    "code": ["run", "execute", "implement", "train", "build", "code", "model", "script"],
+    "code": ["run", "execute", "implement", "train", "build", "model", "script"],
+    "debug": ["debug", "fix", "error", "bug", "broken", "not working", "exception", "traceback", "fix this", "fix this code"],
 }
 
 
@@ -19,11 +20,17 @@ AGENT_KEYWORDS = {
 def decide_agent(query: str) -> str:
     query_lower = query.lower()
 
+    # Check debug FIRST — highest priority
+    if any(kw in query_lower for kw in AGENT_KEYWORDS["debug"]):
+        return "debug"
+
     for agent, keywords in AGENT_KEYWORDS.items():
+        if agent == "debug":
+            continue
         if any(kw in query_lower for kw in keywords):
             return agent
 
-    # If no keyword match, ask the LLM
+    # LLM fallback
     prompt = f"""
 You are an AI orchestrator.
 
@@ -33,20 +40,19 @@ Available agents:
 - data → for dataset analysis, pandas, plots
 - research → for papers, PDFs, explanations
 - code → for programming, ML models, execution
+- debug → for fixing errors, bugs, broken code
 
 Query:
 {query}
 
-Reply with ONLY one word: data, research, or code
+Reply with ONLY one word: data, research, code, or debug
 """
     decision = llm.invoke(prompt).strip().lower()
 
-    # Sanitize LLM response
-    for agent in ["data", "research", "code"]:
+    for agent in ["debug", "data", "research", "code"]:
         if agent in decision:
             return agent
 
-    # Default fallback
     return "research"
 
 
@@ -66,6 +72,12 @@ def orchestrator(query: str):
 
         elif agent_name == "research":
             result = query_research(query)
+
+        elif agent_name == "debug":
+            from agents.debug_agent import debug_agent
+            # Extract the code from the query
+            code = query.split(":", 1)[-1].strip() if ":" in query else query
+            result = debug_agent(code, "Code needs debugging")
 
         else:
             result = coding_agent(query)
